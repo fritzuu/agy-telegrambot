@@ -1,4 +1,4 @@
-# Antigravity CLI (`agy`) - Telegram Bot Bridge `v0.3.0`
+# Antigravity CLI (`agy`) - Telegram Bot Bridge `v0.4.0`
 
 <p align="center">
   <b>English</b> •
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fritzuu/agy-telegrambot/releases"><img src="https://img.shields.io/badge/version-0.3.0-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/fritzuu/agy-telegrambot/releases"><img src="https://img.shields.io/badge/version-0.4.0-blue.svg?style=flat-square" alt="Version"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-brightgreen.svg?style=flat-square" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License"></a>
   <a href="https://github.com/fritzuu/agy-telegrambot/issues"><img src="https://img.shields.io/github/issues/fritzuu/agy-telegrambot?style=flat-square" alt="Issues"></a>
@@ -91,9 +91,16 @@ flowchart TD
 
 ---
 
-## 🌟 Key Features (v0.3.0)
+## 🌟 Key Features (v0.4.0)
 
-### 📱 1. Mobile Companion Suite (Away-from-Mac)
+### 🎙️ 1. Voice Note to Action (Faster-Whisper STT Engine)
+Hands-free coding companion when walking, commuting, or away from your desk:
+- **Direct Voice & Audio Input**: Send Telegram Voice Notes (`.ogg/.oga` Opus) or audio recordings.
+- **100% Offline & Private**: Transcribes locally on Apple Silicon using `faster-whisper` (`int8` quantization) without sending your voice to any third-party cloud.
+- **Visual STT Quote Bubble**: Displays an instant quote bubble with the transcribed text so you always know what the bot heard before execution begins.
+- **Hands-Free Session Reset**: Speak reset keywords (e.g. *"reset sesi"*, *"new session"*) into the microphone to reset context completely hands-free.
+
+### 📱 2. Mobile Companion Suite (Away-from-Mac)
 Built specifically for seamless usage while commuting, lying in bed, or away from your laptop:
 - **Mac Telemetry Hub (`/sys` or `/status`)**: Monitor battery percentage, charging state, remaining time, physical RAM usage, free SSD storage, CPU load averages (1/5/15m), and host uptime.
 - **Anti-Sleep Controller (`/caffeinate [on/off]`)**: Keep your Mac awake in the background while traveling or running lengthy tasks.

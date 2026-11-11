@@ -8,10 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Voice Note (Audio message) transcription support (Whisper / Gemini Multimodal Audio).
 - Document and script file upload handler (`.txt`, `.py`, `.log`).
 - Interactive 1-Tap Admin Approval flow for requested access.
 - Docker containerization & Docker Compose setup.
+
+---
+
+## [0.4.0] - 2026-11-11
+
+### Added
+- **🎙️ Voice Note to Action (Faster-Whisper STT Engine)**:
+  - Direct Telegram Voice Notes (`.ogg/.oga` Opus) and Audio messages handling.
+  - 100% offline, privacy-first, on-device transcription powered by `faster-whisper` on Apple Silicon with `int8` quantization.
+  - Instant visual feedback: Shows animated transcribing indicator, followed by a persistent speech-to-text quote bubble so users always see what was heard.
+  - Spoken reset keyword recognition (`/new`, `reset`, `reset sesi`, `mulai sesi baru`) to reset sessions entirely hands-free.
+  - Background thread execution via `asyncio.to_thread` preventing any asyncio event loop blocks during inference.
+  - Cache rotation & automatic cleanup of downloaded audio notes in `downloads/`.
+  - Configurable Whisper model size via `WHISPER_MODEL` environment variable (default: `base`, options: `tiny`, `base`, `small`).
 
 ---
 

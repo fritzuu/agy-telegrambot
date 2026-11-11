@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Antigravity CLI (agy) - Telegram Bot Bridge v0.3.0
+Antigravity CLI (agy) - Telegram Bot Bridge v0.4.0
 High-Performance Async Bridge with Live 1-Bubble Streaming, Deterministic Session Tracking,
 FIFO Queue Management, Dynamic Heartbeat Monitor, HTTP Connection Pooling,
-Image Preprocessing, Isolated Workspace Routing, Custom Casual Persona,
-Mac Telemetry Hub, Anti-Sleep Mode, Remote Screen Capture, and Hardened Security.
+Image Preprocessing, Voice Note Transcription (Faster-Whisper), Isolated Workspace Routing,
+Custom Casual Persona, Mac Telemetry Hub, Anti-Sleep Mode, Remote Screen Capture, and Hardened Security.
 """
 
 import asyncio
@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -402,6 +403,42 @@ def preprocess_and_resize_image(img_path: Path, max_dim: int = 1024, quality: in
     except Exception as e:
         logger.warning(f"Could not resize image {img_path}: {e}")
     return img_path
+
+
+# Whisper Audio & Voice Note Transcription Service
+_WHISPER_MODEL = None
+_WHISPER_LOCK = threading.Lock()
+WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "base")
+
+
+def get_whisper_model(model_size: Optional[str] = None):
+    """Lazy-loads and caches the faster-whisper model singleton thread-safely."""
+    global _WHISPER_MODEL
+    with _WHISPER_LOCK:
+        if _WHISPER_MODEL is None:
+            size = model_size or WHISPER_MODEL_NAME
+            logger.info(f"Loading faster-whisper model '{size}' on CPU/int8...")
+            try:
+                from faster_whisper import WhisperModel
+                _WHISPER_MODEL = WhisperModel(size, device="cpu", compute_type="int8")
+                logger.info(f"faster-whisper model '{size}' loaded successfully.")
+            except Exception as e:
+                logger.error(f"Failed to load faster-whisper model '{size}': {e}", exc_info=True)
+                raise
+        return _WHISPER_MODEL
+
+
+def transcribe_audio_file(audio_path: Path | str, model_size: Optional[str] = None) -> str:
+    """Transcribes an audio or voice note file to text using faster-whisper."""
+    model = get_whisper_model(model_size)
+    segments, info = model.transcribe(
+        str(audio_path),
+        beam_size=5,
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500),
+    )
+    texts = [segment.text.strip() for segment in segments if segment.text.strip()]
+    return " ".join(texts).strip()
 
 
 def markdown_to_telegram_html(text: str) -> str:
@@ -839,7 +876,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome = (
         "Yo! 🤖 <b>Antigravity Assistant siap nemenin lu ngoding!</b>\n\n"
-        "Tanya apa aja, lempar cuplikan kode, atau kirim foto/screenshot error. Gua bakal bantu beresin langsung.\n\n"
+        "Tanya apa aja, kirim voice note (VN), lempar cuplikan kode, atau kirim foto/screenshot error. Gua bakal bantu beresin langsung.\n\n"
         "<b>Perintah Cepat:</b>\n"
         f"• <code>/pwd</code> — Cek workspace aktif (saat ini: <code>{html.escape(current_ws)}</code>)\n"
         "• <code>/projects</code> — Switcher folder proyek via tombol tap\n"
@@ -1656,7 +1693,9 @@ async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "<b>📖 Panduan Lengkap Antigravity Mobile Bridge</b>\n\n"
-        "Ketik instruksi koding, lempar snippet, atau kirim foto untuk langsung berkolaborasi bareng AI.\n\n"
+        "Ketik instruksi koding, kirim voice note (VN), lempar snippet, atau kirim foto untuk langsung berkolaborasi bareng AI.\n\n"
+        "<b>🎙️ Input Suara (Voice Note):</b>\n"
+        "• Rekam & kirim VN kapan aja. Suara lu otomatis ditranskrip lokal via Whisper & langsung dieksekusi!\n\n"
         "<b>🛠️ Navigasi & Workspace:</b>\n"
         "• <code>/projects</code> atau <code>/fav</code> — Tombol tap buat switch proyek\n"
         "• <code>/pwd</code> — Cek path folder workspace aktif\n"
@@ -1728,6 +1767,79 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
         f"{caption}"
     )
     await enqueue_or_run_task(update, context, prompt_with_image)
+
+
+@check_auth
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming Telegram Voice Notes (.ogg/.oga) and Audio files, transcribing to text."""
+    if not update.message:
+        return
+
+    voice = update.message.voice or update.message.audio
+    if not voice:
+        return
+
+    status_msg = await update.message.reply_text(
+        "🎧 <i>Mendengarkan voice note & transkrip...</i>",
+        parse_mode="HTML",
+    )
+
+    try:
+        tg_file = await context.bot.get_file(voice.file_id)
+        timestamp = int(time.time() * 1000)
+        ext = ".oga" if update.message.voice else Path(getattr(voice, "file_name", None) or "audio.mp3").suffix or ".mp3"
+        saved_path = DOWNLOADS_DIR / f"tele_voice_{timestamp}{ext}"
+
+        await tg_file.download_to_drive(custom_path=str(saved_path))
+        logger.info(f"Downloaded user voice note to {saved_path}")
+
+        # Transcribe asynchronously in a thread pool to avoid blocking the event loop
+        transcribed_text = await asyncio.to_thread(transcribe_audio_file, saved_path)
+
+        # Rotate / cleanup old downloads
+        cleanup_old_downloads(max_files=30, max_age_hours=24)
+
+        if not transcribed_text or not transcribed_text.strip():
+            await status_msg.edit_text(
+                "🔇 <i>Voice note kosong atau suaranya kurang jelas nih bro, coba kirim lagi ya!</i>",
+                parse_mode="HTML",
+            )
+            return
+
+        # Show quote of what was transcribed
+        await status_msg.edit_text(
+            f"🎙️ <b>Transkrip VN:</b>\n"
+            f"<i>\"{html.escape(transcribed_text)}\"</i>",
+            parse_mode="HTML",
+        )
+
+        # Check for plain text reset keywords inside voice note
+        lower_vn = transcribed_text.lower().strip()
+        if lower_vn in {"/new", "/reset", "new", "reset", "reset sesi", "reset session", "mulai sesi baru"}:
+            await new_command(update, context)
+            return
+
+        # Append optional caption if user typed one along with the voice message
+        caption = (update.message.caption or "").strip()
+        full_prompt = transcribed_text
+        if caption:
+            full_prompt = f"{transcribed_text}\n\n(Catatan tambahan: {caption})"
+
+        # Enqueue or run the transcribed prompt in Antigravity
+        await enqueue_or_run_task(update, context, full_prompt)
+
+    except Exception as e:
+        logger.error(f"Error handling voice message: {e}", exc_info=True)
+        try:
+            await status_msg.edit_text(
+                f"⚠️ Gagal memproses voice note:\n<code>{html.escape(str(e))}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            await update.message.reply_text(
+                f"⚠️ Gagal memproses voice note:\n<code>{html.escape(str(e))}</code>",
+                parse_mode="HTML",
+            )
 
 
 async def post_init(application):
@@ -1809,10 +1921,11 @@ def main():
     app.add_handler(CallbackQueryHandler(cancel_callback_handler, pattern=r"^(cancel_task|cancel_queue):"))
 
     # Messages
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_message))
 
-    print("Bot v0.3.0 berjalan dengan Mobile Companion & Casual Persona. Tekan Ctrl+C untuk berhenti.")
+    print("Bot v0.4.0 berjalan dengan Voice Note Support, Mobile Companion & Casual Persona. Tekan Ctrl+C untuk berhenti.")
     app.run_polling()
 
 

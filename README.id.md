@@ -1,4 +1,4 @@
-# Antigravity CLI (`agy`) - Telegram Bot Bridge `v0.3.0`
+# Antigravity CLI (`agy`) - Telegram Bot Bridge `v0.4.0`
 
 <p align="center">
   <a href="README.md">English</a> •
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fritzuu/agy-telegrambot/releases"><img src="https://img.shields.io/badge/version-0.3.0-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/fritzuu/agy-telegrambot/releases"><img src="https://img.shields.io/badge/version-0.4.0-blue.svg?style=flat-square" alt="Version"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-brightgreen.svg?style=flat-square" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License"></a>
   <a href="https://github.com/fritzuu/agy-telegrambot/issues"><img src="https://img.shields.io/github/issues/fritzuu/agy-telegrambot?style=flat-square" alt="Issues"></a>
@@ -91,9 +91,16 @@ flowchart TD
 
 ---
 
-## 🌟 Fitur Utama (v0.3.0)
+## 🌟 Fitur Utama (v0.4.0)
 
-### 📱 1. Mobile Companion Suite (Away-from-Mac)
+### 🎙️ 1. Voice Note to Action (Faster-Whisper STT Engine)
+Navigasi dan coding tanpa ngetik saat di jalan, nyetir, atau rebahan:
+- **Input Suara & Rekaman Audio**: Kirim Voice Note Telegram (`.ogg/.oga` Opus) atau file audio langsung.
+- **100% Offline & Privat**: Transkrip lokal di Apple Silicon menggunakan `faster-whisper` (kuantisasi `int8`) tanpa mengirim audio ke cloud pihak ketiga.
+- **Visual STT Quote Bubble**: Menampilkan bubble kutipan teks hasil transkrip sehingga kamu selalu tahu apa yang didengar bot sebelum dieksekusi.
+- **Hands-Free Session Reset**: Ucapkan kata kunci reset (misal: *"reset sesi"*, *"new session"*) ke mikrofon untuk mereset konteks secara hands-free.
+
+### 📱 2. Mobile Companion Suite (Away-from-Mac)
 Dirancang khusus untuk kenyamanan penggunaan saat Anda sedang di luar, komuter, atau jauh dari laptop:
 - **Mac Telemetry Hub (`/sys` atau `/status`)**: Pantau persentase baterai, status charging/discharging, estimasi daya tersisa, pemakaian RAM fisik, sisa kapasitas SSD, CPU load average (1/5/15m), dan uptime Mac.
 - **Anti-Sleep Controller (`/caffeinate [on/off]`)**: Jaga Mac Anda agar tidak sleep saat ditinggal bepergian.
