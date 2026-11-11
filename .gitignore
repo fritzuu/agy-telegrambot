@@ -21,6 +21,9 @@ downloads/*
 !downloads/.gitkeep
 
 
+# Graphify
+graphify-out/
+
 # IDE & OS files
 .DS_Store
 .vscode/
