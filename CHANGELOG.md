@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Live 1-Bubble Streaming**: Real-time response streaming inside a single Telegram message bubble with throttled editing to prevent flood limits.
+- **Asynchronous FIFO Task Queue**: Sequential user message queuing via `asyncio.Queue` preventing race conditions and concurrent command overlaps.
+- **Robust Telegram HTML Formatting**: Dedicated `markdown_to_telegram_html` parser to sanitize and format markdown directly to Telegram HTML.
+- **Native Telegram Bot Commands**: Auto-registration of `[ ≡ Menu ]` native commands list via `post_init`.
+
+### Removed
+- Deprecated `/sendimg` command in favor of direct bidirectional multimodal uploads.
+
 ### Planned
 - Voice Note (Audio message) transcription support.
 - Document and script file upload handler (`.txt`, `.py`, `.log`).

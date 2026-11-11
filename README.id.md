@@ -153,7 +153,6 @@ chmod +x run.sh
 | `/stop` / `/cancel` | **[Baru di v0.2.0]** Menghentikan proses task yang sedang berjalan |
 | `/new` atau `/reset` | Mengosongkan riwayat percakapan aktif dan memulai sesi baru |
 | `/session` | Menampilkan `conversation_id` aktif yang digunakan oleh Antigravity |
-| `/sendimg <path>` | Mengirimkan file gambar lokal dari komputer host ke chat Telegram |
 | `/help` | Menampilkan panduan dan instruksi penggunaan |
 
 ---

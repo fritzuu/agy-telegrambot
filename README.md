@@ -194,7 +194,6 @@ chmod +x run.sh
 | `/stop` / `/cancel` | **[New in v0.2.0]** Terminates the currently executing task |
 | `/new` or `/reset` | Clears active conversation memory to start fresh |
 | `/session` | Shows the active Antigravity `conversation_id` |
-| `/sendimg <path>` | Transmits a specific local image from host to Telegram |
 | `/help` | Displays usage instructions |
 
 ---
