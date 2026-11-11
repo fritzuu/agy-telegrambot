@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Antigravity CLI (agy) - Telegram Bot Bridge v0.2.0
+Antigravity CLI (agy) - Telegram Bot Bridge v0.3.0
 High-Performance Async Bridge with Live 1-Bubble Streaming, Deterministic Session Tracking,
 FIFO Queue Management, Dynamic Heartbeat Monitor, HTTP Connection Pooling,
-Image Preprocessing, Isolated Workspace Routing, and Custom Casual Persona.
+Image Preprocessing, Isolated Workspace Routing, Custom Casual Persona,
+Mac Telemetry Hub, Anti-Sleep Mode, Remote Screen Capture, and Hardened Security.
 """
 
 import asyncio
@@ -16,6 +17,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
@@ -51,12 +53,71 @@ DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_WORKSPACE = Path.home() / "agy-workspace"
 DEFAULT_WORKSPACE.mkdir(parents=True, exist_ok=True)
 
-# Allowed Telegram User IDs (comma-separated). If empty, bot is open to all.
+# Allowed Telegram User IDs (comma-separated).
 raw_allowed = os.getenv("ALLOWED_TELEGRAM_USERS", "").strip()
-ALLOWED_USERS: set[str] = {u.strip() for u in raw_allowed.split(",") if u.strip()}
+ALLOWED_USERS: set[str] = {u.strip("\"' ") for u in raw_allowed.split(",") if u.strip("\"' ")}
 
 AGY_PATH = shutil.which("agy") or str(Path.home() / ".local" / "bin" / "agy")
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+
+# Forbidden paths for /get to prevent exfiltration of sensitive files & keys
+FORBIDDEN_DIR_NAMES = {".ssh", ".gnupg", ".aws", ".config", ".git", ".kube", ".password-store"}
+FORBIDDEN_FILES = {
+    "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "authorized_keys", "known_hosts",
+    ".bash_history", ".zsh_history", ".history",
+}
+FORBIDDEN_EXTENSIONS = {".pem", ".key", ".pkcs12", ".pfx", ".p12", ".kdbx", ".crt", ".cer"}
+
+
+def is_sensitive_path(p: Path) -> bool:
+    """Checks if a path targets sensitive credentials, keys, or private configs."""
+    try:
+        resolved = p.resolve()
+        for part in resolved.parts:
+            if part in FORBIDDEN_DIR_NAMES:
+                return True
+        if resolved.name in FORBIDDEN_FILES:
+            return True
+        if resolved.suffix.lower() in FORBIDDEN_EXTENSIONS:
+            return True
+        if resolved.name.startswith(".env"):
+            return True
+    except Exception:
+        return True
+    return False
+
+
+def cleanup_old_downloads(max_files: int = 30, max_age_hours: int = 24) -> None:
+    """Removes old cached photos from downloads directory to prevent disk bloat."""
+    try:
+        if not DOWNLOADS_DIR.exists():
+            return
+        now = time.time()
+        files = [p for p in DOWNLOADS_DIR.iterdir() if p.is_file()]
+        files.sort(key=lambda p: p.stat().st_mtime)
+
+        remaining = []
+        for f in files:
+            age_hours = (now - f.stat().st_mtime) / 3600
+            if age_hours > max_age_hours:
+                try:
+                    f.unlink()
+                    logger.info(f"Cleaned up expired cache file: {f.name}")
+                except Exception:
+                    pass
+            else:
+                remaining.append(f)
+
+        if len(remaining) > max_files:
+            to_delete = remaining[: len(remaining) - max_files]
+            for f in to_delete:
+                try:
+                    f.unlink()
+                    logger.info(f"Rotated excess cache file: {f.name}")
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"Error in cleanup_old_downloads: {e}")
 
 AVAILABLE_MODELS = {
     "gemini-3.8-flash-high": "⚡ Gemini 3.8 Flash (High)",
@@ -82,6 +143,9 @@ Karakter & Gaya Komunikasi Utama:
 # Global concurrency limiter: maximum 2 heavy tasks across all users to preserve host RAM/CPU
 GLOBAL_SEMAPHORE = asyncio.Semaphore(2)
 
+# Global session file async lock to prevent race conditions during concurrent updates
+SESSION_LOCK = asyncio.Lock()
+
 # In-memory registry of running tasks: user_id -> asyncio.subprocess.Process
 active_tasks: dict[str, asyncio.subprocess.Process] = {}
 
@@ -94,6 +158,8 @@ active_caffeinate_proc: Optional[asyncio.subprocess.Process] = None
 # Destructive command patterns blocked in /sh
 DANGEROUS_SH_PATTERNS = [
     r"rm\s+-rf\s+[\/~]",
+    r"rm\s+-r\s+-f\s+[\/~]",
+    r"rm\s+--recursive\s+--force\s+[\/~]",
     r"mkfs",
     r"dd\s+if=",
     r":\(\)\{.*\}",
@@ -108,20 +174,41 @@ logger = logging.getLogger(__name__)
 
 
 def check_auth(func):
-    """Decorator to enforce whitelist user authorization."""
+    """Decorator to enforce whitelist user authorization with SECURE-BY-DEFAULT policy."""
     @functools.wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user = update.effective_user
-        if user and ALLOWED_USERS and str(user.id) not in ALLOWED_USERS:
-            logger.warning(f"Unauthorized access attempt by user ID {user.id} (@{user.username})")
+        if not user:
+            return
+
+        user_id_str = str(user.id)
+        if not ALLOWED_USERS:
+            # SECURE BY DEFAULT: If whitelist is not configured, block ALL requests
+            logger.error(f"Access BLOCKED: ALLOWED_TELEGRAM_USERS is empty. Bot is locked down! User ID: {user.id}")
+            msg = (
+                "🔒 <b>Bot Terkunci (Secure by Default)</b>\n\n"
+                "Belum ada Telegram User ID yang didaftarkan di <code>ALLOWED_TELEGRAM_USERS</code> pada file <code>.env</code>.\n\n"
+                f"User ID Anda: <code>{user.id}</code>\n"
+                "Silakan masukkan ID di atas ke file <code>.env</code> host untuk membuka akses bot."
+            )
             if update.message:
-                await update.message.reply_text(
-                    f"⛔ <b>Akses Ditolak</b>\nTelegram User ID Anda (<code>{user.id}</code>) belum terdaftar di whitelist bot.",
-                    parse_mode="HTML",
-                )
+                await update.message.reply_text(msg, parse_mode="HTML")
+            elif update.callback_query:
+                await update.callback_query.answer("🔒 Bot terkunci: daftarkan ID Anda di .env", show_alert=True)
+            return
+
+        if user_id_str not in ALLOWED_USERS:
+            logger.warning(f"Unauthorized access attempt by user ID {user.id} (@{user.username})")
+            denied_msg = (
+                f"⛔ <b>Akses Ditolak</b>\n"
+                f"Telegram User ID Anda (<code>{user.id}</code>) belum terdaftar di whitelist bot."
+            )
+            if update.message:
+                await update.message.reply_text(denied_msg, parse_mode="HTML")
             elif update.callback_query:
                 await update.callback_query.answer("⛔ Akses ditolak: ID Anda belum terdaftar.", show_alert=True)
             return
+
         return await func(update, context, *args, **kwargs)
     return wrapper
 
@@ -160,17 +247,22 @@ def load_sessions() -> dict[str, dict]:
 
 
 def save_sessions(sessions: dict[str, dict]) -> None:
+    """Atomic write to sessions.json to prevent race conditions or file corruption."""
     try:
-        with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
+        tmp_file = SESSIONS_FILE.with_suffix(f".tmp.{os.getpid()}")
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(sessions, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, SESSIONS_FILE)
     except Exception as e:
-        logger.error(f"Error saving sessions: {e}")
+        logger.error(f"Error saving sessions atomically: {e}")
 
 
 async def perform_full_reset(user_id: str) -> None:
     """
     Safely and deterministically resets a user session:
-    1. Kills any active agy subprocess for this user.
+    1. Kills any active agy subprocess for this user and awaits termination (preventing zombies).
     2. Purges any pending messages in user's queue.
     3. Explicitly wipes conversation_id in sessions.json so agy starts completely anew.
     """
@@ -178,6 +270,11 @@ async def perform_full_reset(user_id: str) -> None:
     if proc:
         try:
             proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
         except Exception as e:
             logger.warning(f"Error terminating process on reset: {e}")
 
@@ -188,17 +285,18 @@ async def perform_full_reset(user_id: str) -> None:
             except asyncio.QueueEmpty:
                 break
 
-    sessions = load_sessions()
-    current_model = sessions.get(user_id, {}).get("model", DEFAULT_MODEL)
-    current_ws = sessions.get(user_id, {}).get("workspace", str(DEFAULT_WORKSPACE))
-    current_favs = sessions.get(user_id, {}).get("favorites") or [str(DEFAULT_WORKSPACE), str(BASE_DIR)]
-    sessions[user_id] = {
-        "conversation_id": None,
-        "model": current_model,
-        "workspace": current_ws,
-        "favorites": current_favs,
-    }
-    save_sessions(sessions)
+    async with SESSION_LOCK:
+        sessions = load_sessions()
+        current_model = sessions.get(user_id, {}).get("model", DEFAULT_MODEL)
+        current_ws = sessions.get(user_id, {}).get("workspace", str(DEFAULT_WORKSPACE))
+        current_favs = sessions.get(user_id, {}).get("favorites") or [str(DEFAULT_WORKSPACE), str(BASE_DIR)]
+        sessions[user_id] = {
+            "conversation_id": None,
+            "model": current_model,
+            "workspace": current_ws,
+            "favorites": current_favs,
+        }
+        save_sessions(sessions)
     logger.info(f"User {user_id} session completely reset (conversation_id cleared).")
 
 
@@ -387,27 +485,61 @@ def markdown_to_telegram_html(text: str) -> str:
     return text
 
 
+def balance_html_tags(chunk: str) -> tuple[str, str]:
+    """
+    Finds unclosed HTML tags in chunk, closes them at the end,
+    and returns (closed_chunk, reopened_tags_prefix).
+    """
+    tag_pattern = r"<\/?([a-zA-Z0-9\-]+)(?:\s+[^>]*?)?>"
+    tag_stack = []
+
+    for match in re.finditer(tag_pattern, chunk):
+        raw_tag = match.group(0)
+        tag_name = match.group(1).lower()
+        if raw_tag.startswith("</"):
+            if tag_stack and tag_stack[-1][0] == tag_name:
+                tag_stack.pop()
+        elif not raw_tag.endswith("/>"):
+            tag_stack.append((tag_name, raw_tag))
+
+    if not tag_stack:
+        return chunk, ""
+
+    closing_suffix = "".join([f"</{name}>" for name, _ in reversed(tag_stack)])
+    reopen_prefix = "".join([raw for _, raw in tag_stack])
+    return chunk + closing_suffix, reopen_prefix
+
+
 def split_html_chunks(text: str, max_chars: int = 4000) -> list[str]:
-    """Split formatted HTML text into chunks under Telegram's 4096 limit, preserving lines."""
+    """Split formatted HTML text into chunks under Telegram's 4096 limit, preserving lines and tag integrity."""
     if len(text) <= max_chars:
         return [text]
-    chunks = []
+
+    raw_chunks: list[str] = []
     current = ""
     for line in text.splitlines(keepends=True):
         if len(current) + len(line) > max_chars:
             if current:
-                chunks.append(current)
+                raw_chunks.append(current)
                 current = ""
             if len(line) > max_chars:
                 for i in range(0, len(line), max_chars):
-                    chunks.append(line[i : i + max_chars])
+                    raw_chunks.append(line[i : i + max_chars])
             else:
                 current = line
         else:
             current += line
     if current:
-        chunks.append(current)
-    return chunks
+        raw_chunks.append(current)
+
+    balanced_chunks: list[str] = []
+    carry_over = ""
+    for chunk in raw_chunks:
+        full_chunk = carry_over + chunk
+        closed_chunk, carry_over = balance_html_tags(full_chunk)
+        balanced_chunks.append(closed_chunk)
+
+    return balanced_chunks
 
 
 def extract_images_from_text(text: str) -> tuple[str, list[tuple[Path, str]]]:
@@ -790,6 +922,11 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if proc:
         try:
             proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
             cancelled_something = True
         except Exception as e:
             logger.error(f"Error terminating process: {e}")
@@ -931,7 +1068,7 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data == "menu:screen":
         await query.edit_message_text("📸 <i>Mengambil screenshot layar Mac...</i>", parse_mode="HTML")
-        tmp_path = Path("/tmp") / f"mac_screen_{int(time.time())}.png"
+        tmp_path = Path("/tmp") / f"mac_screen_{uuid.uuid4().hex[:8]}.png"
         try:
             proc = await asyncio.create_subprocess_exec(
                 "screencapture", "-x", str(tmp_path),
@@ -1149,7 +1286,7 @@ async def caffeinate_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def screen_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Takes silent screenshot of Mac desktop and sends it as a photo."""
     msg = await update.message.reply_text("📸 <i>Mengambil screenshot layar Mac...</i>", parse_mode="HTML")
-    tmp_path = Path("/tmp") / f"mac_screen_{int(time.time())}.png"
+    tmp_path = Path("/tmp") / f"mac_screen_{uuid.uuid4().hex[:8]}.png"
     try:
         proc = await asyncio.create_subprocess_exec(
             "screencapture", "-x", str(tmp_path),
@@ -1328,6 +1465,15 @@ async def get_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Block sensitive paths, dotfolders, credentials, and keys
+    if is_sensitive_path(target_path):
+        logger.warning(f"Blocked attempt to download sensitive file: {target_path} by user {user_id}")
+        await update.message.reply_text(
+            "⛔ <b>Akses Ditolak:</b> File ini termasuk konfigurasi sensitif / kredensial sistem yang diproteksi demi keamanan.",
+            parse_mode="HTML",
+        )
+        return
+
     if not target_path.exists():
         await update.message.reply_text(
             f"❌ <b>File tidak ditemukan:</b>\n<code>{html.escape(str(target_path))}</code>",
@@ -1454,6 +1600,11 @@ async def cancel_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if proc:
             try:
                 proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
             except Exception as e:
                 logger.error(f"Error terminating proc: {e}")
             await query.edit_message_text("🛑 <b>Tugas berhasil dibatalkan oleh pengguna.</b>", parse_mode="HTML")
@@ -1569,6 +1720,9 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Preprocess & downscale image with Pillow for fast vision inference
     optimized_path = preprocess_and_resize_image(saved_path, max_dim=1024, quality=85)
 
+    # Rotate / clean up old cached downloads to preserve disk space
+    cleanup_old_downloads(max_files=30, max_age_hours=24)
+
     prompt_with_image = (
         f"[User mengirim file gambar dari Telegram, tersimpan di: {optimized_path}]\n"
         f"{caption}"
@@ -1607,7 +1761,7 @@ def main():
     if ALLOWED_USERS:
         print(f"Whitelist aktif untuk user ID: {', '.join(ALLOWED_USERS)}")
     else:
-        print("PERINGATAN: Whitelist kosong, bot terbuka untuk publik.")
+        print("PERINGATAN KRITIS: Whitelist kosong! Bot terkunci (Secure by Default).")
 
     # High performance HTTP client with connection pooling
     request_client = HTTPXRequest(
@@ -1658,7 +1812,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_message))
 
-    print("Bot v0.2.0 berjalan dengan Mobile Companion & Casual Persona. Tekan Ctrl+C untuk berhenti.")
+    print("Bot v0.3.0 berjalan dengan Mobile Companion & Casual Persona. Tekan Ctrl+C untuk berhenti.")
     app.run_polling()
 
 
