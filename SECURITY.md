@@ -22,7 +22,7 @@ When operating `agy-telegram-bot`, keep in mind that the bot runs with the permi
 If you discover a security vulnerability within this project, please **do not open a public issue**.
 
 Instead, please send an advisory or report directly to the repository maintainer:
-- Email: **revanzhafran@gmail.com** (or via GitHub Private Security Advisory)
+- Email: **revanalifiandev@gmail.com** (or via GitHub Private Security Advisory)
 
 Please include:
 - A description of the vulnerability and its potential impact.
