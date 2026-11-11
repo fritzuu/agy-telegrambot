@@ -1,261 +1,288 @@
 # Antigravity CLI (`agy`) - Telegram Bot Bridge `v0.1`
 
-[![Version](https://img.shields.io/badge/version-0.1-blue.svg)](README.md)
-[![Python](https://img.shields.io/badge/python-3.10+-brightgreen.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+<p align="center">
+  <b>English</b> •
+  <a href="README.id.md">Bahasa Indonesia</a>
+</p>
 
-Bridge cerdas dua arah untuk menghubungkan percakapan **Telegram** langsung dengan **Google Antigravity CLI (`agy`)**. Memungkinkan Anda mengontrol, memprogram, dan berdiskusi dengan AI coding agent Antigravity langsung dari ponsel atau desktop Telegram Anda secara persisten dan interaktif.
+<p align="center">
+  <a href="https://github.com/fritzuu/agy-telegrambot/releases"><img src="https://img.shields.io/badge/version-0.1.0-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-brightgreen.svg?style=flat-square" alt="Python"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License"></a>
+  <a href="https://github.com/fritzuu/agy-telegrambot/issues"><img src="https://img.shields.io/github/issues/fritzuu/agy-telegrambot?style=flat-square" alt="Issues"></a>
+  <a href="https://t.me/BotFather"><img src="https://img.shields.io/badge/telegram-bot-2CA5E0?style=flat-square&logo=telegram&logoColor=white" alt="Telegram"></a>
+</p>
+
+An intelligent, bidirectional bridge connecting **Telegram** chats directly with **Google Antigravity CLI (`agy`)**. Seamlessly control, interact with, and instruct your local AI coding agent on the go from your phone or desktop via Telegram.
 
 ---
 
-## 🌟 Fitur Utama (v0.1)
+## 🏛️ System Architecture
 
-1. **Multi-turn Session Memory (Percakapan Bersambung)**
-   - Setiap user Telegram memiliki sesi percakapan persisten (`sessions.json` yang disinkronkan langsung dengan database internal Antigravity `conversation_summaries.db`).
-   - Bot mengingat konteks pembicaraan sebelumnya sehingga Anda dapat berdialog secara alami tanpa kehilangan arah.
+```mermaid
+flowchart LR
+    subgraph Client ["📱 User Client"]
+        TG_APP["Telegram App (Mobile / Desktop)"]
+    end
 
-2. **Dukungan Media Dua Arah (Two-Way Image Support)**
-   - **Kirim Gambar ke Agent**: Kirim foto dari Telegram (dengan atau tanpa caption). Bot otomatis menyimpannya di folder `downloads/` dan memberikannya ke `agy` untuk dianalisis.
-   - **Terima Gambar dari Agent**: Jika Antigravity menghasilkan gambar, diagram, atau merujuk path file lokal (`![caption](path)` atau path gambar lokal), bot akan mendeteksinya dan otomatis mengunggah gambar tersebut ke chat Telegram.
+    subgraph Telegram_Cloud ["☁️ Telegram Cloud"]
+        TG_API["Telegram Bot API"]
+    end
 
-3. **Status Typing Real-Time**
-   - Menampilkan indikator status *typing...* di Telegram selama Antigravity CLI sedang memproses prompt, menjalankan tools, atau menganalisis kode.
+    subgraph Host ["💻 Host Machine (macOS / Linux / Windows)"]
+        direction TB
+        BOT["bot.py (Python Async Bridge)"]
+        SESS[("sessions.json (User Mapping)")]
+        MEDIA[("downloads/ (Temporary Media)")]
+        AGY_CLI["agy (Antigravity CLI Binary)"]
+        AGY_DB[("conversation_summaries.db (SQLite)")]
+
+        BOT <--> SESS
+        BOT <--> MEDIA
+        BOT -- "agy -p 'prompt' --conversation <id>" --> AGY_CLI
+        AGY_CLI <--> AGY_DB
+    end
+
+    TG_APP <--> TG_API
+    TG_API <--> BOT
+```
+
+---
+
+## 🌟 Key Features (v0.1.0)
+
+1. **Multi-turn Session Memory & Continuity**
+   - Each Telegram user retains a persistent conversation state (`sessions.json` synchronized directly with Antigravity's internal SQLite database `conversation_summaries.db`).
+   - The agent retains context from previous turns for natural, progressive dialogue.
+
+2. **Bidirectional Media Processing**
+   - **User ➡️ Agent**: Send photos or screenshots from Telegram with optional captions. The bridge saves them to `downloads/` and forwards them to `agy` for multimodal inspection.
+   - **Agent ➡️ User**: When Antigravity outputs images, plots, or diagrams (via Markdown `![caption](path)` or local file paths), the bot automatically detects and uploads the media directly to your chat.
+
+3. **Real-time Typing Status**
+   - Sends periodic `typing...` actions while the CLI is executing tasks, researching code, or running shell commands.
 
 4. **Smart Message Chunking**
-   - Secara otomatis memecah jawaban panjang dari agent agar tidak terpotong oleh batasan 4096 karakter dari API Telegram.
+   - Automatically segments large responses to prevent truncation or rejections caused by Telegram's 4096-character limit.
 
-5. **Eksekusi Otomatis (Autonomous Execution)**
-   - Dilengkapi opsi `AUTO_APPROVE_TOOLS=true` (`--dangerously-skip-permissions`) di file konfigurasi, memungkinkan agen menjalankan perintah shell atau tool tanpa terhambat prompt konfirmasi manual di terminal.
+5. **Autonomous Execution Mode**
+   - Configurable `AUTO_APPROVE_TOOLS=true` (`--dangerously-skip-permissions`) enables frictionless automation without interactive CLI terminal prompts.
 
-6. **Command Navigasi Bawaan**:
-   - `/start` — Memulai interaksi & panduan ringkas.
-   - `/new` atau `/reset` — Menghapus riwayat percakapan aktif dan memulai sesi baru.
-   - `/session` — Memeriksa Conversation ID aktif dari Antigravity.
-   - `/sendimg <path>` — Mengirimkan file gambar tertentu dari komputer host langsung ke Telegram.
-   - `/help` — Menampilkan bantuan dan daftar fitur.
-
----
-
-## 📋 Persyaratan Sistem
-
-- **Python**: Versi 3.10 atau lebih baru.
-- **Package Manager**: [uv](https://docs.astral.sh/uv/) (direkomendasikan) atau `pip` standar.
-- **Antigravity CLI**: Executable `agy` sudah terpasang dan terautentikasi di sistem host.
-- **Akun Telegram**: Untuk membuat bot via `@BotFather`.
+6. **Built-in Telegram Commands**:
+   - `/start` — Welcome message and quick instructions.
+   - `/new` or `/reset` — Clears active conversation memory and starts fresh.
+   - `/session` — Inspects your active Antigravity Conversation ID.
+   - `/sendimg <path>` — Directly sends any local image from your host machine to Telegram.
+   - `/help` — Displays usage guidance and available commands.
 
 ---
 
-## 1. Cara Menghubungkan ke Telegram
+## 📋 Prerequisites
 
-Ikuti langkah-langkah berikut untuk mendapatkan API Token bot Telegram Anda:
+- **Python**: Version 3.10 or higher.
+- **Package Manager**: [uv](https://docs.astral.sh/uv/) (recommended) or standard `pip`.
+- **Antigravity CLI**: `agy` binary installed and authenticated on your host.
+- **Telegram Account**: To create and configure a bot via `@BotFather`.
 
-1. **Buka Telegram** dan cari akun resmi **[@BotFather](https://t.me/BotFather)**.
-2. Kirim pesan:
+---
+
+## 1. Connecting to Telegram
+
+1. Open Telegram and search for the official **[@BotFather](https://t.me/BotFather)**.
+2. Send:
    ```text
    /newbot
    ```
-3. BotFather akan meminta:
-   - **Nama Bot**: Misal `My Antigravity Assistant`
-   - **Username Bot**: Harus unik dan berakhiran `bot` (contoh: `my_antigravity_bot` atau `agy_bridge_bot`).
-4. Setelah selesai, BotFather akan memberikan **HTTP API Token** seperti contoh:
+3. Follow the prompts:
+   - **Bot Name**: e.g., `My Antigravity Assistant`
+   - **Bot Username**: Must be unique and end in `bot` (e.g., `my_antigravity_bot`).
+4. Copy the generated **HTTP API Token**:
    ```text
    7123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ1234567
    ```
-5. Salin token tersebut, lalu buat/edit file `.env` di folder root project:
+5. Create your `.env` configuration file from the template:
    ```bash
-   cp .env.example .env  # jika ada, atau buat langsung .env
+   cp .env.example .env
    ```
-   Isi file `.env`:
+6. Paste your token into `.env`:
    ```env
    TELEGRAM_BOT_TOKEN="7123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ1234567"
    AUTO_APPROVE_TOOLS=true
    ```
-   > **Catatan Keamanan**: Jangan pernah membagikan atau mengunggah file `.env` yang berisi token Telegram Anda ke repositori publik!
+
+> [!CAUTION]
+> Never share or commit your `.env` file containing your Telegram Bot Token to public repositories!
 
 ---
 
-## 2. Cara Menghubungkan ke Antigravity CLI (`agy`) di Semua Platform OS
+## 2. Connecting to Antigravity CLI (`agy`) Across Operating Systems
 
-Bot ini berkomunikasi langsung dengan binary `agy` pada mesin host Anda. Pastikan `agy` sudah terpasang dan dapat dijalankan di terminal.
+The bridge executes `agy` commands directly on your host operating system. Ensure `agy` is installed and accessible in your shell.
 
 ### 🍎 macOS
-1. **Verifikasi Binary**:
-   Pastikan binary `agy` tersedia. Secara default terpasang di `~/.local/bin/agy` atau melalui PATH sistem.
+1. **Locate Binary**:
+   By default, `agy` is located at `~/.local/bin/agy` or available in your global `PATH`:
    ```bash
    which agy
-   # atau
+   # or
    ls -la ~/.local/bin/agy
    ```
-2. **Tambahkan ke PATH** (jika belum terdeteksi di shell):
-   Buka file `~/.zshrc` (atau `~/.bash_profile`), lalu tambahkan:
+2. **Add to PATH** (if not already included):
+   Add this to `~/.zshrc` (or `~/.bash_profile`):
    ```bash
    export PATH="$HOME/.local/bin:$PATH"
    ```
-   Terapkan perubahan dengan `source ~/.zshrc`.
-3. **Autentikasi**:
-   Jalankan `agy` sekali di terminal dan pastikan sudah terhubung/login ke akun Anda:
+   Apply changes with `source ~/.zshrc`.
+3. **Verify Authentication**:
    ```bash
-   agy -p "halo"
+   agy -p "hello"
    ```
 
 ---
 
 ### 🐧 Linux (Ubuntu / Debian / Fedora / Arch)
-1. **Verifikasi Binary**:
-   Periksa apakah `agy` ada di path:
+1. **Verify Binary**:
    ```bash
    which agy
    ```
-   Jika ditaruh di `~/.local/bin/agy`, pastikan permission file executable:
+   Ensure the binary has executable permissions:
    ```bash
    chmod +x ~/.local/bin/agy
    ```
-2. **Tambahkan ke PATH**:
-   Tambahkan baris berikut ke `~/.bashrc`:
+2. **Add to PATH**:
+   Add the following line to `~/.bashrc`:
    ```bash
    export PATH="$HOME/.local/bin:$PATH"
    ```
-   Jalankan `source ~/.bashrc`.
-3. **Autentikasi**:
-   Verifikasi bahwa `agy` dapat mengeksekusi prompt:
+   Reload with `source ~/.bashrc`.
+3. **Test CLI**:
    ```bash
-   agy -p "cek status"
+   agy -p "check system status"
    ```
 
 ---
 
 ### 🪟 Windows
 
-Untuk Windows, terdapat dua metode:
+Two setup approaches are supported:
 
-#### Opsi A: Menggunakan WSL 2 (Sangat Direkomendasikan)
-Menjalankan bot dan `agy` di dalam **Windows Subsystem for Linux (WSL 2)** memberikan pengalaman yang paling stabil dan identik dengan Linux/macOS.
-1. Buka terminal WSL (Ubuntu):
-   ```bash
-   cd ~
-   git clone <repo-anda> agy-telegram-bot
-   cd agy-telegram-bot
-   ```
-2. Ikuti panduan setup Linux di atas.
+#### Option A: WSL 2 (Highly Recommended)
+Running both the bot and `agy` inside **Windows Subsystem for Linux (WSL 2)** provides identical behavior and stability to Linux/macOS:
+1. Open your WSL terminal (e.g., Ubuntu).
+2. Follow the Linux setup instructions above.
 
-#### Opsi B: Native Windows (PowerShell / Command Prompt)
-1. **Pastikan `agy.exe` ada di PATH Sistem**:
-   - Buka *Environment Variables* di Windows.
-   - Tambahkan direktori tempat `agy.exe` berada (misalnya `%USERPROFILE%\.local\bin` atau folder instalasi Antigravity Anda) ke variabel `PATH`.
-   - Buka PowerShell baru dan uji:
+#### Option B: Native Windows (PowerShell / Command Prompt)
+1. **Add `agy.exe` to System PATH**:
+   - Open *Environment Variables* in Windows.
+   - Add the directory containing `agy.exe` (e.g., `%USERPROFILE%\.local\bin`) to your user or system `Path`.
+   - Test in a new PowerShell window:
      ```powershell
      agy --version
      ```
-2. **Setup Python Virtual Environment**:
+2. **Configure Virtual Environment**:
    ```powershell
    python -m venv .venv
    .\.venv\Scripts\Activate.ps1
    pip install "python-telegram-bot[job-queue]" python-dotenv
    ```
-3. **Konfigurasi Database Path**:
-   Secara default pada Windows, database percakapan Antigravity berada di `%USERPROFILE%\.gemini\antigravity-cli\conversation_summaries.db`. Python `Path.home()` pada `bot.py` akan otomatis mengarah ke folder profil user Windows Anda.
-4. **Jalankan Bot**:
+3. **Start the Bridge**:
    ```powershell
    python bot.py
    ```
 
 ---
 
-## 3. Instalasi & Menjalankan Bot
+## 3. Installation & Quickstart
 
-### Langkah Cepat (macOS / Linux)
-
-Gunakan script peluncur bawaan `run.sh` yang secara otomatis menyiapkan virtual environment menggunakan `uv`:
-
+### Quickstart (macOS / Linux)
+Use the included automated launcher `run.sh` (powered by `uv`):
 ```bash
-# 1. Masuk ke direktori
-cd ~/agy-telegram-bot
-
-# 2. Pastikan file script executable
 chmod +x run.sh
-
-# 3. Jalankan bot
 ./run.sh
 ```
 
-### Langkah Manual (Semua OS)
-
-Jika ingin menyiapkan dependensi secara manual:
-
+### Manual Installation (All Platforms)
 ```bash
-# Buat virtual environment
+# 1. Create virtual environment
 python3 -m venv .venv
 
-# Aktifkan venv
+# 2. Activate virtual environment
 # macOS/Linux:
 source .venv/bin/activate
-# Windows PowerShell:
+# Windows:
 # .\.venv\Scripts\Activate.ps1
 
-# Install dependensi
+# 3. Install dependencies
 pip install "python-telegram-bot[job-queue]" python-dotenv
 
-# Jalankan bot
+# 4. Start the bot
 python3 bot.py
 ```
 
 ---
 
-## 4. Menjalankan di Latar Belakang (Background Service)
+## 4. Running as a Background Daemon
 
-Agar bot tetap berjalan meskipun Anda menutup jendela terminal:
+Keep the bot running indefinitely even after closing your terminal session:
 
-### Menggunakan `tmux` / `screen` (Paling Praktis)
-```bash
-tmux new -s agy-bot
-./run.sh
-# Tekan Ctrl+B lalu D untuk detach
-# Untuk kembali: tmux attach -t agy-bot
-```
-
-### Menggunakan `nohup`
-```bash
-nohup ./run.sh > bot.log 2>&1 &
-```
-
-### Menggunakan `pm2`
-```bash
-pm2 start run.sh --name "agy-telegram-bot"
-pm2 save
-```
+- **Using `tmux` (Recommended)**:
+  ```bash
+  tmux new -s agy-bot
+  ./run.sh
+  # Press Ctrl+B then D to detach
+  # Reattach later: tmux attach -t agy-bot
+  ```
+- **Using `nohup`**:
+  ```bash
+  nohup ./run.sh > bot.log 2>&1 &
+  ```
+- **Using `pm2`**:
+  ```bash
+  pm2 start run.sh --name "agy-telegram-bot"
+  pm2 save
+  ```
 
 ---
 
-## 5. Ringkasan Perintah Telegram
+## 5. Command Reference
 
-| Perintah | Deskripsi |
+| Command | Description |
 | :--- | :--- |
-| `/start` | Menampilkan pesan sambutan dan status bot |
-| `/new` atau `/reset` | Mengosongkan riwayat percakapan aktif dan memulai sesi baru |
-| `/session` | Menampilkan `conversation_id` aktif yang digunakan oleh Antigravity |
-| `/sendimg <path>` | Mengirimkan file gambar lokal dari komputer host ke chat Telegram |
-| `/help` | Menampilkan panduan dan instruksi penggunaan |
+| `/start` | Displays welcome message, status, and feature guide |
+| `/new` or `/reset` | Clears active conversation memory to begin a fresh session |
+| `/session` | Shows the active Antigravity `conversation_id` |
+| `/sendimg <path>` | Transmits a specific local image from host to Telegram |
+| `/help` | Displays usage instructions |
 
 ---
 
-## 📁 Struktur Direktori
+## 📁 Repository Structure
 
 ```text
 agy-telegram-bot/
-├── .env                  # Token Telegram & konfigurasi flags (jangan di-commit)
-├── .gitignore            # File yang diabaikan Git
-├── README.md             # Dokumentasi proyek (v0.1)
-├── bot.py                # Core application bridge Telegram <-> Antigravity CLI
-├── run.sh                # Launcher script otomatis dengan uv
-├── sessions.json         # Penyimpanan mapping user ID Telegram -> conversation ID
-├── downloads/            # Direktori sementara foto dari Telegram user
-└── bot.log               # Log eksekusi runtime
+├── .github/              # Issue & PR templates
+├── .env.example          # Environment variable template
+├── .gitignore            # Git exclusion rules
+├── CHANGELOG.md          # Release version history
+├── CONTRIBUTING.md       # Contribution guidelines
+├── CODE_OF_CONDUCT.md    # Contributor Covenant Code of Conduct
+├── LICENSE               # MIT License
+├── README.md             # Primary documentation (English)
+├── README.id.md          # Indonesian documentation (Bahasa Indonesia)
+├── bot.py                # Core async bridge (Telegram <-> Antigravity CLI)
+├── run.sh                # Automated launcher with uv
+├── sessions.json         # Telegram User ID to Conversation ID map
+└── downloads/            # Temporary media storage for Telegram images
 ```
 
 ---
 
-## 🛡️ Tips & Troubleshooting
+## 🤝 Contributing
 
-- **Bot tidak merespons**: Pastikan `TELEGRAM_BOT_TOKEN` di `.env` sudah benar dan tidak ada proses bot lama yang berjalan bersamaan (menghindari konflik *polling*).
-- **Executable `agy` tidak ditemukan**: Pastikan `which agy` mengembalikan path yang valid. Jika binary Anda berada di lokasi khusus, atur variabel `AGY_PATH` di baris atas `bot.py` atau pastikan symlink tersedia di `/usr/local/bin/agy` atau `~/.local/bin/agy`.
-- **Izin Eksekusi Tools**: Jika Anda ingin agen selalu mengeksekusi perintah tanpa meminta persetujuan manual di terminal, pastikan `AUTO_APPROVE_TOOLS=true` diset di `.env`.
+Contributions are welcomed! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup, code standards, and PR workflows. Please adhere to the [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [`LICENSE`](LICENSE) file for details.
