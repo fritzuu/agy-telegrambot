@@ -8,10 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Telegram User ID Whitelist / Access Control via `.env`.
 - Voice Note (Audio message) transcription support.
 - Document and script file upload handler (`.txt`, `.py`, `.log`).
-- Automatic fallback for Markdown parse errors.
+- Docker containerization & Docker Compose setup.
+
+---
+
+## [0.2.0] - 2026-11-11
+
+### Added
+- **Interactive Task Cancellation**:
+  - Dynamic inline button `🛑 Batalkan Proses` attached to status message during prompt execution.
+  - Commands `/stop` and `/cancel` to terminate running `agy` subprocess on demand.
+- **Interactive Model Selection (`/model`)**:
+  - Interactive Inline Keyboard to select Antigravity AI models (Gemini 3.8 Flash, Claude Sonnet 4.6, Claude Opus 4.6, GPT-OSS 120B).
+  - Model preference persisted per-user and dynamically passed to `agy` via `--model`.
+- **Quick Actions Hub (`/menu`)**:
+  - Interactive dashboard for routine actions: Git Status, Reset Session, Host System Info, and Session/Model Info.
+- **Security Whitelist (`ALLOWED_TELEGRAM_USERS`)**:
+  - User ID access control via `.env` to prevent unauthorized execution of local commands.
+- **Safe Markdown Parser Fallback**:
+  - Automatic fallback to plain text if Telegram fails to parse entities, preventing dropped responses.
 
 ---
 
@@ -20,21 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Core Async Bridge**: Connects Telegram Bot with Google Antigravity CLI (`agy`) print mode.
 - **Multi-turn Session Persistence**: Per-user conversation tracking synced with Antigravity SQLite database `conversation_summaries.db`.
-- **Bidirectional Media Processing**:
-  - Automatically downloads photos sent by user in Telegram and passes filepath to `agy`.
-  - Discovers local images in `agy` responses (both Markdown `![alt](path)` and local absolute file paths) and uploads them directly to Telegram.
-- **Typing Indicator Loop**: Periodic background typing action during long-running tasks.
-- **Smart Message Chunking**: Automatic slicing of responses exceeding Telegram's 4096-character limit into 4000-character segments.
-- **Commands**:
-  - `/start` - Initial welcome and usage instructions.
-  - `/new` and `/reset` - Conversation context reset.
-  - `/session` - Retrieve active Antigravity conversation ID.
-  - `/sendimg <path>` - Transmit local host images on demand.
-  - `/help` - Usage guide.
-- **Tool Automation**: `AUTO_APPROVE_TOOLS` environment variable setting `--dangerously-skip-permissions`.
-- **Cross-Platform Launcher**: `run.sh` script providing automated virtual environment setup and execution with `uv`.
-- **Open Source Governance & Documentation**:
-  - Dual-language documentation: `README.md` (English) and `README.id.md` (Bahasa Indonesia).
-  - MIT License.
-  - Contribution guidelines (`CONTRIBUTING.md`) and Code of Conduct (`CODE_OF_CONDUCT.md`).
-  - GitHub issue and PR templates.
+- **Bidirectional Media Processing**: Automatic image discovery and uploads.
+- **Typing Indicator Loop**: Background typing action during prompt execution.
+- **Smart Message Chunking**: Slices long text exceeding 4096 characters.
+- **Initial Commands**: `/start`, `/new`, `/reset`, `/session`, `/sendimg`, `/help`.
+- **Open Source Governance & Documentation**: Dual-language README (EN & ID), MIT License, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, and GitHub templates.
