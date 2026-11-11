@@ -1,0 +1,26 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Secrets & Environment Variables
+.env
+*.env
+
+# Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime Data & Logs
+bot.log
+*.log
+sessions.json
+*.session
+downloads/
+
+# IDE & OS files
+.DS_Store
+.vscode/
+.idea/
+
