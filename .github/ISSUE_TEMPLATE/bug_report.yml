@@ -1,0 +1,41 @@
+name: 🐛 Bug Report
+description: Create a report to help us improve the bot bridge
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: input
+    id: environment
+    attributes:
+      label: Operating System & Python Version
+      description: What OS and Python version are you running?
+      placeholder: e.g., macOS Sequoia / Ubuntu 24.04, Python 3.12.2
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the behavior?
+      placeholder: |
+        1. Start the bot with `./run.sh`
+        2. Send message `/session` in Telegram
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Log Output
+      description: Please copy and paste any relevant logs from `bot.log` or terminal output.
+      render: shell
