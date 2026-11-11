@@ -156,6 +156,81 @@ user_queues: dict[str, asyncio.Queue] = {}
 # Background caffeinate process handle
 active_caffeinate_proc: Optional[asyncio.subprocess.Process] = None
 
+
+class PersistentWorker:
+    """Maintains a warm, pre-booted agy worker process for instant interactive turn execution."""
+
+    def __init__(self, proc: asyncio.subprocess.Process, workspace: str, model: str, conv_id: Optional[str] = None):
+        self.proc = proc
+        self.workspace = workspace
+        self.model = model
+        self.conv_id = conv_id
+        self.lock = asyncio.Lock()
+        self.last_used = time.time()
+
+
+# Active warm workers per user: user_id -> PersistentWorker
+active_workers: dict[str, PersistentWorker] = {}
+
+
+async def get_or_spawn_worker(user_id: str, workspace: str, model: str, conv_id: Optional[str]) -> PersistentWorker:
+    """Retrieves an existing warm worker or boots a new one with zero-latency stdin/stdout streaming."""
+    worker = active_workers.get(user_id)
+    if worker and worker.proc.returncode is None:
+        # If idle for more than 30 minutes, cleanly refresh worker
+        if time.time() - worker.last_used > 1800:
+            logger.info(f"Worker for user {user_id} was idle for >30m. Reaping...")
+            await terminate_worker(user_id)
+        elif worker.workspace == workspace and worker.model == model:
+            worker.last_used = time.time()
+            return worker
+        else:
+            await terminate_worker(user_id)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{Path.home()}/.local/bin:/opt/homebrew/bin:{env.get('PATH', '')}"
+    cmd = [
+        AGY_PATH,
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+        "--effort", "medium",
+    ]
+    if model:
+        cmd.extend(["--model", model])
+    if conv_id:
+        cmd.extend(["--conversation", conv_id])
+    if AUTO_APPROVE:
+        cmd.append("--dangerously-skip-permissions")
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+        cwd=workspace,
+    )
+    worker = PersistentWorker(proc, workspace, model, conv_id)
+    active_workers[user_id] = worker
+    logger.info(f"Spawned new warm persistent worker for user {user_id} (PID: {proc.pid}) in {workspace}")
+    return worker
+
+
+async def terminate_worker(user_id: str) -> None:
+    """Gracefully terminates and reaps a user's persistent worker."""
+    worker = active_workers.pop(user_id, None)
+    if worker and worker.proc.returncode is None:
+        try:
+            worker.proc.terminate()
+            try:
+                await asyncio.wait_for(worker.proc.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                worker.proc.kill()
+                await worker.proc.wait()
+            logger.info(f"Worker for user {user_id} terminated cleanly.")
+        except Exception as e:
+            logger.warning(f"Error terminating worker for user {user_id}: {e}")
+
 # Destructive command patterns blocked in /sh
 DANGEROUS_SH_PATTERNS = [
     r"rm\s+-rf\s+[\/~]",
@@ -263,10 +338,12 @@ def save_sessions(sessions: dict[str, dict]) -> None:
 async def perform_full_reset(user_id: str) -> None:
     """
     Safely and deterministically resets a user session:
-    1. Kills any active agy subprocess for this user and awaits termination (preventing zombies).
-    2. Purges any pending messages in user's queue.
-    3. Explicitly wipes conversation_id in sessions.json so agy starts completely anew.
+    1. Terminates any warm worker and awaits termination (preventing zombies).
+    2. Kills any active agy subprocess for this user and awaits termination.
+    3. Purges any pending messages in user's queue.
+    4. Explicitly wipes conversation_id in sessions.json so agy starts completely anew.
     """
+    await terminate_worker(user_id)
     proc = active_tasks.pop(user_id, None)
     if proc:
         try:
@@ -663,20 +740,12 @@ async def execute_agy_turn(update: Update, context: ContextTypes.DEFAULT_TYPE, u
     else:
         cli_prompt = user_prompt
 
-    cmd = [AGY_PATH, "-p", cli_prompt, "--output-format", "stream-json"]
-    if conv_id:
-        cmd.extend(["--conversation", conv_id])
-    if selected_model:
-        cmd.extend(["--model", selected_model])
-    if AUTO_APPROVE:
-        cmd.append("--dangerously-skip-permissions")
-
     cancel_keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🛑 Batalkan Proses", callback_data=f"cancel_task:{user_id}")]
     ])
 
     status_msg = await update.message.reply_text(
-        f"⚙️ <b>Antigravity</b> (<i>{model_label}</i>) sedang mempersiapkan...",
+        f"⚡ <b>Antigravity</b> (<i>{model_label}</i>) siap...",
         parse_mode="HTML",
         reply_markup=cancel_keyboard,
     )
@@ -685,6 +754,7 @@ async def execute_agy_turn(update: Update, context: ContextTypes.DEFAULT_TYPE, u
     current_status = "Sedang berpikir..."
     last_edit_time = time.time()
     last_stream_activity = time.time()
+    first_edit_done = False
     done_event = asyncio.Event()
 
     heartbeat_task = asyncio.create_task(
@@ -692,94 +762,105 @@ async def execute_agy_turn(update: Update, context: ContextTypes.DEFAULT_TYPE, u
     )
 
     try:
-        # Wrap subprocess in global concurrency semaphore
+        # Wrap execution in global concurrency semaphore
         async with GLOBAL_SEMAPHORE:
-            env = os.environ.copy()
-            env["PATH"] = f"{Path.home()}/.local/bin:{env.get('PATH', '')}"
+            worker = await get_or_spawn_worker(user_id, user_workspace, selected_model, conv_id)
+            active_tasks[user_id] = worker.proc
 
-            # Execute strictly inside the user's dedicated workspace directory
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                cwd=user_workspace,
-            )
-            active_tasks[user_id] = proc
+            async with worker.lock:
+                if worker.proc.returncode is not None:
+                    logger.warning(f"Worker for user {user_id} was closed. Restarting...")
+                    await terminate_worker(user_id)
+                    worker = await get_or_spawn_worker(user_id, user_workspace, selected_model, conv_id)
+                    active_tasks[user_id] = worker.proc
 
-            # Stream reader loop
-            while True:
-                line = await proc.stdout.readline()
-                if not line:
-                    break
-                last_stream_activity = time.time()
-                line_str = line.decode("utf-8", errors="replace").strip()
-                if not line_str:
-                    continue
+                # Send input to stream
+                user_event = {"event": "user", "message": {"content": cli_prompt}}
+                encoded_input = (json.dumps(user_event) + "\n").encode("utf-8")
+                worker.proc.stdin.write(encoded_input)
+                await worker.proc.stdin.drain()
 
-                try:
-                    data = json.loads(line_str)
-                    event = data.get("event")
+                # Stream reader loop for this turn
+                while True:
+                    line = await worker.proc.stdout.readline()
+                    if not line:
+                        break
+                    last_stream_activity = time.time()
+                    line_str = line.decode("utf-8", errors="replace").strip()
+                    if not line_str:
+                        continue
 
-                    # Deterministic conversation_id from stream init
-                    if event == "init":
-                        new_conv = data.get("conversation_id")
-                        if new_conv:
-                            sessions[user_id] = {
-                                "conversation_id": new_conv,
-                                "model": selected_model,
-                                "workspace": user_workspace,
-                            }
-                            save_sessions(sessions)
+                    try:
+                        data = json.loads(line_str)
+                        event = data.get("event")
 
-                    elif event == "step_update":
-                        step = data.get("step_update", {})
-                        stype = step.get("step_type")
-                        delta = step.get("text_delta")
-                        if delta:
-                            accumulated_text += delta
+                        # Deterministic conversation_id from stream init
+                        if event == "init":
+                            new_conv = data.get("conversation_id")
+                            if new_conv:
+                                worker.conv_id = new_conv
+                                sessions[user_id] = {
+                                    "conversation_id": new_conv,
+                                    "model": selected_model,
+                                    "workspace": user_workspace,
+                                }
+                                save_sessions(sessions)
 
-                        if stype == "agent_response":
-                            current_status = "✍️ Ngetik jawaban..."
-                        elif stype == "tool_call" or "tool" in str(stype):
-                            tool_name = step.get("tool_name", "alat sistem")
-                            current_status = f"🛠️ Eksekusi {tool_name}..."
-                        elif stype == "user_input":
-                            current_status = "🧠 Mikir bentar..."
+                        elif event == "step_update":
+                            step = data.get("step_update", {})
+                            stype = step.get("step_type")
+                            delta = step.get("text_delta")
+                            if delta:
+                                accumulated_text += delta
 
-                    elif event == "result":
-                        res = data.get("result", {})
-                        final_res = res.get("response")
-                        if final_res:
-                            accumulated_text = final_res
+                            if stype == "agent_response":
+                                current_status = "✍️ Ngetik jawaban..."
+                            elif stype == "tool_call" or "tool" in str(stype):
+                                tool_name = step.get("tool_name", "alat sistem")
+                                current_status = f"🛠️ Eksekusi {tool_name}..."
+                            elif stype == "user_input":
+                                current_status = "🧠 Mikir bentar..."
 
-                    # Single bubble debounced update (1.5s interval)
-                    now = time.time()
-                    if now - last_edit_time >= 1.5 and accumulated_text.strip():
-                        last_edit_time = now
-                        preview = (
-                            accumulated_text[-350:]
-                            if len(accumulated_text) > 350
-                            else accumulated_text
-                        )
-                        bubble_text = (
-                            f"⚙️ <b>Antigravity</b> (<i>{model_label}</i>)\n"
-                            f"<b>Status:</b> {current_status}\n\n"
-                            f"<code>{html.escape(preview.strip() or '...')}</code>"
-                        )
-                        try:
-                            await status_msg.edit_text(
-                                bubble_text,
-                                parse_mode="HTML",
-                                reply_markup=cancel_keyboard,
+                        elif event == "result":
+                            res = data.get("result", {})
+                            final_res = res.get("response")
+                            if final_res:
+                                accumulated_text = final_res
+                            # Turn completed! Worker stays warm in memory for next turns.
+                            break
+
+                        # Fast-flush first chunk (<200ms) and debounce subsequent edits to 0.7s
+                        now = time.time()
+                        should_edit = False
+                        if not first_edit_done and accumulated_text.strip():
+                            should_edit = True
+                            first_edit_done = True
+                        elif now - last_edit_time >= 0.7 and accumulated_text.strip():
+                            should_edit = True
+
+                        if should_edit:
+                            last_edit_time = now
+                            preview = (
+                                accumulated_text[-350:]
+                                if len(accumulated_text) > 350
+                                else accumulated_text
                             )
-                        except Exception:
-                            pass
+                            bubble_text = (
+                                f"⚙️ <b>Antigravity</b> (<i>{model_label}</i>)\n"
+                                f"<b>Status:</b> {current_status}\n\n"
+                                f"<code>{html.escape(preview.strip() or '...')}</code>"
+                            )
+                            try:
+                                await status_msg.edit_text(
+                                    bubble_text,
+                                    parse_mode="HTML",
+                                    reply_markup=cancel_keyboard,
+                                )
+                            except Exception:
+                                pass
 
-                except json.JSONDecodeError:
-                    continue
-
-            await proc.wait()
+                    except json.JSONDecodeError:
+                        continue
 
     except asyncio.CancelledError:
         logger.info(f"Task for user {user_id} was cancelled.")
@@ -940,6 +1021,7 @@ async def cd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         sessions[user_id]["workspace"] = str(target_path)
     save_sessions(sessions)
+    await terminate_worker(user_id)
 
     await update.message.reply_text(
         f"📂 <b>Workspace Aktif Berhasil Dipindahkan!</b>\n"
@@ -951,11 +1033,12 @@ async def cd_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @check_auth
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel active subprocess and flush queue."""
+    """Cancel active subprocess, persistent worker, and flush queue."""
     user_id = str(update.effective_user.id)
     cancelled_something = False
 
-    proc = active_tasks.get(user_id)
+    await terminate_worker(user_id)
+    proc = active_tasks.pop(user_id, None)
     if proc:
         try:
             proc.terminate()
@@ -1026,6 +1109,7 @@ async def select_model_callback(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             sessions[user_id]["model"] = model_key
         save_sessions(sessions)
+        await terminate_worker(user_id)
 
         model_label = AVAILABLE_MODELS[model_key]
         await query.edit_message_text(
@@ -1433,6 +1517,7 @@ async def projects_callback_handler(update: Update, context: ContextTypes.DEFAUL
             u_data["workspace"] = new_path
             sessions[user_id] = u_data
             save_sessions(sessions)
+            await terminate_worker(user_id)
             p_name = Path(new_path).name or new_path
             await query.edit_message_text(
                 f"✅ <b>Workspace Berpindah!</b>\n\n"
@@ -1633,7 +1718,8 @@ async def cancel_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Hanya pemilik task yang dapat membatalkannya.", show_alert=True)
             return
 
-        proc = active_tasks.get(user_id)
+        await terminate_worker(user_id)
+        proc = active_tasks.pop(user_id, None)
         if proc:
             try:
                 proc.terminate()
@@ -1875,8 +1961,9 @@ def main():
     else:
         print("PERINGATAN KRITIS: Whitelist kosong! Bot terkunci (Secure by Default).")
 
-    # High performance HTTP client with connection pooling
+    # High performance HTTP/2 client with connection pooling
     request_client = HTTPXRequest(
+        http_version="2",
         connection_pool_size=16,
         read_timeout=60.0,
         write_timeout=20.0,
@@ -1925,7 +2012,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_message))
 
-    print("Bot v0.4.0 berjalan dengan Voice Note Support, Mobile Companion & Casual Persona. Tekan Ctrl+C untuk berhenti.")
+    print("Bot v0.4.1 berjalan dengan Voice Notes, Warm Worker Streaming, HTTP/2 & Mobile Companion. Tekan Ctrl+C untuk berhenti.")
     app.run_polling()
 
 

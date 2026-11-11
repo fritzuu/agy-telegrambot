@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.1] - 2026-11-11
+
+### Performance
+- **⚡ Native CLI Speed & Persistent Warm Worker**:
+  - Implemented bidirectional in-memory NDJSON streaming (`--input-format stream-json --output-format stream-json`) keeping `agy` warm in RAM.
+  - Eliminated process cold-boot startup overhead, reducing warm turn latency from ~55s down to **~2.5s** (~21.6x speedup).
+  - Instant first-flush token streaming in **<200ms**, with throttled subsequent bubble updates at **0.7s** debounce.
+  - Enabled **HTTP/2 Multiplexing** (`h2`) on Telegram `HTTPXRequest` client with persistent connection pooling.
+  - Tuned CLI reasoning effort (`--effort medium`) for lightning-fast turn responses on general coding and casual prompts.
+  - Lifecycle safety: Persistent worker cleanly reaped on `/new`, `/cd`, `/stop`, `/model`, or `/projects` workspace switching.
+
+---
+
 ## [0.4.0] - 2026-11-11
 
 ### Added

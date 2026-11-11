@@ -7,7 +7,7 @@ cd "$DIR"
 if [ ! -d ".venv" ]; then
     echo "Creating virtual environment..."
     uv venv
-    uv pip install "python-telegram-bot[job-queue]" python-dotenv pillow "faster-whisper" "av<14"
+    uv pip install "python-telegram-bot[job-queue]" python-dotenv pillow "faster-whisper" "av<14" h2
 fi
 
 echo "Starting agy Telegram Bot..."
